@@ -11,8 +11,7 @@
 # 5. obliczenie trajektorii na płaszczyźnie
 # 6. wizualizacja trajektorii na płaszczyźnie z zaznaczonymi krzywymi (hiperbolami)
 # 7. zapisanie wyników w jakiś uporządkowany sposób
-
-# wyświetlanie czasu po każdym etapie
+# 8. wyświetlanie czasu po każdym etapie
 
 import time
 import numpy as np
@@ -20,64 +19,6 @@ import scipy as sp
 import acoular as ac
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-
-# TO REMOVE
-def plotHeatmap2(matrix, cc_maxs=None, name='gp5', min_max=None, zero=None, yticks=None, yticks_step = 5, ylim=None, ch1 = -1, ch2 = -1):
-
-    plt.figure(figsize=(8, 4))
-    #
-    if ylim is not None:
-        plt.ylim(ylim)
-    #
-    # # --- USTALENIE EXTENT ---
-    # if yticks is not None:
-    #     y_min = np.min(yticks)
-    #     y_max = np.max(yticks)
-    # else:
-    #     y_min = 0
-    #     y_max = matrix.shape[1]
-    #
-    # x_min = 0
-    # x_max = matrix.shape[0]
-
-    # --- HEATMAPA Z EXTENT ---
-    plt.imshow(
-        matrix.T,
-        aspect='auto',
-        cmap='gray',
-        origin='lower',
-        # extent=(0, len(matrix), min_delay - n // 2, max_delay - n // 2),
-    )
-    # plt.colorbar(label='Wartość')
-
-    # # --- OŚ X ---
-    x = np.arange(matrix.shape[0])
-    #
-    # # --- OŚ Y ---
-    # if yticks is not None:
-    #     ymin = int(np.ceil(yticks[0]))
-    #     ymax = int(np.floor(yticks[-1]))
-    #     # plt.yticks(np.arange(ymin, ymax + 1, yticks_step))
-    #
-    # # --- ZERO LINE ---
-    if zero is not None:
-        plt.plot(x, np.zeros_like(x) + zero, linewidth=2, color='yellow', linestyle='dashed')
-    #
-    # # --- CC MAXS ---
-    if cc_maxs is not None:
-        plt.plot(x, np.array(cc_maxs), 'r', linewidth=2)
-    #
-    # # --- MIN/MAX ---
-    # if min_max is not None:
-    #     plt.plot(x, np.zeros_like(x) + min_max[0], 'w', linewidth=2)
-    #     plt.plot(x, np.zeros_like(x) + min_max[1], 'w', linewidth=2)
-
-    plt.xlabel("Numer ramki w nagraniu")
-    plt.ylabel("Przesunięcie w próbkach")
-    plt.title(f"Funkcja korelacji {matrix.T.shape} Kanały: {ch1}, {ch2}")
-
-    # plt.tight_layout()
-    plt.show()
 
 wavFiles = [
     './audio/TwoDrones_96000Hz_24bit.wav',
@@ -87,17 +28,41 @@ wavFiles = [
 ]
 
 n = 8192
-delayRange = 50
+
+# True aby wyświetlać wykresy na bieżąco
+testPlots = True
+# True aby zapisywać dane
+saveData = False
+# prefiks dodawany plików przy zapisie
+filePrefix = ''
 
 def loadMicrophonePositions(xml_file):
     mg = ac.MicGeom(file = xml_file)
-    xs = mg.pos[0]
-    ys = mg.pos[1]
-    return list(zip(xs, ys))
+    return mg.pos[:2, :].T
+
+def calculateDelayRange(sampleRate, c = 343.0):
+    # maksymalne możliwe opoźnienie w próbkac
+    microphoneDistance = 0.23 # [m]
+    delayRange = microphoneDistance * sampleRate / c
+    return int(delayRange // 2 + 1) + 10
 
 def timeSamplesGeneratorFromWavFile(filename, n = 8192):
     sampleRate, wavData = sp.io.wavfile.read(filename)
+
+    numberOfSamples = wavData.shape[0]
     numberOfChannels = wavData.shape[1] if wavData.ndim > 1 else 1
+    duration = numberOfSamples / sampleRate
+
+    print("")
+    print("=" * 50)
+    print(f"File:       {filename}")
+    print(f"Samples:    {numberOfSamples}")
+    print(f"Channels:   {numberOfChannels}")
+    print(f"SampleRate: {sampleRate} Hz")
+    print(f"Duration:   {duration} s")
+    print(f"Frames:     {int(np.ceil(numberOfSamples / n))}")
+    print("=" * 50, end='\n\n')
+
     timeSamples = ac.TimeSamples(data = wavData, sample_freq = sampleRate)
     return timeSamples.result(num = n), numberOfChannels, sampleRate
 
@@ -118,7 +83,7 @@ def gccPhat(xseg, yseg, n = 8192, delayRange = 50):
 
     return cc[minDelay:maxDelay]
 
-def viterbiAlgorithm(transitionMatrix, emissionMatrix, initialProbability, emissionWeight=1.9):
+def viterbiAlgorithm(transitionMatrix, emissionMatrix, initialProbability, emissionWeight = 1.9):
     A = np.array(transitionMatrix)
     B = np.array(emissionMatrix)
     pi = np.array(initialProbability)
@@ -149,19 +114,19 @@ def viterbiAlgorithm(transitionMatrix, emissionMatrix, initialProbability, emiss
 
     return states
 
-def gaussianDistributionFromPeaks(peaks, length, sigma=3.0, normalize=True):
+def gaussianDistributionFromPeaks(peaks, length, sigma = 3.0, normalize = True):
     y = np.arange(length)
     prior = np.zeros(length, dtype=float)
 
     for p in peaks:
-        prior += np.exp(-(y - p)**2 / (2 * sigma**2))
+        prior += np.exp(-(y - p)*(y - p) / (2 * sigma * sigma))
 
     if normalize:
         prior /= prior.sum() + 1e-12
 
     return prior
 
-def removePathFromHeatmap(heatmap, path, radius=6):
+def removePathFromHeatmap(heatmap, path, radius = 6):
     new_heatmap = heatmap.copy()
     y_dim, x_dim = new_heatmap.shape
     for x, y_coord in enumerate(path):
@@ -170,15 +135,16 @@ def removePathFromHeatmap(heatmap, path, radius=6):
         new_heatmap[y_min:y_max, x] = 0.0
     return new_heatmap
 
-def calculatePathsVA(heatmap, numberOfLines = 2, beta = 2.0, emissionWeight = 1.9, removeRadius = 3):
+def calculatePathsVA(heatmap, numberOfLines = 2, sigma = 1.0, emissionWeight = 5.0, removeRadius = 3):
     heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-12)
     yRange, xRange = heatmap.shape
 
     transitionMatrix = np.zeros((yRange, yRange))
     for i in range(yRange):
         for j in range(yRange):
-            transitionMatrix[i, j] = np.exp(-(i - j)*(i - j) / (beta * beta))
-    transitionMatrix /= transitionMatrix.sum(axis=1, keepdims=True)
+            transitionMatrix[i, j] = np.exp(-(i - j) * (i - j) / (2 * sigma * sigma))
+    # prawa macierz stochastyczna (wiersz)
+    transitionMatrix /= transitionMatrix.sum(axis = 1, keepdims = True)
     currentHeatmap = heatmap.copy()
     allPaths = []
 
@@ -186,44 +152,47 @@ def calculatePathsVA(heatmap, numberOfLines = 2, beta = 2.0, emissionWeight = 1.
         peak = np.argmax(heatmap[:, 0])
 
         initialProbability = gaussianDistributionFromPeaks(
-            peaks=[peak],
-            length=yRange,
-            sigma=10.0,
-            normalize=True
+            peaks = [peak],
+            length = yRange,
+            sigma = 10.0,
+            normalize = True
         )
 
-        path = viterbiAlgorithm(transitionMatrix, currentHeatmap, initialProbability, emissionWeight)
+        path = viterbiAlgorithm(
+            transitionMatrix = transitionMatrix,
+            emissionMatrix = currentHeatmap,
+            initialProbability = initialProbability,
+            emissionWeight = emissionWeight
+        )
         allPaths.append(path)
 
-        currentHeatmap = removePathFromHeatmap(currentHeatmap, path, radius=removeRadius)
+        currentHeatmap = removePathFromHeatmap(
+            heatmap = currentHeatmap,
+            path = path,
+            radius = removeRadius
+        )
 
     return np.array(allPaths)
 
-def hyperbolaContours(tdoa_list, mic_pairs, mic_positions, X, Y, c = 343.0):
-    # tdoa_list.shape -> (4, 2, 1259)
+def hyperbolaContours(allPaths, micPairs, micPositions, X, Y, c = 343.0):
+    # allPaths.shape -> (4, 2, 1259)
     # zawiera 2 polozenia maksimow dla każdego z 4 mikrofonów w każdej z 1259 ramek
 
-    # n_pairs, n_sources, n_frames = tdoa_list.shape
-    # estimated_positions = np.zeros((n_sources, n_frames, 2))
-
-    # dla kżdej ramki 2 pozycja (1259, 2, 2)
-    est = np.zeros((tdoa_list.shape[2], tdoa_list.shape[1], 2))
+    # dla kżdej ramki pozycja (x,y) dla źródła (1259, 2, 2)
+    est = np.zeros((allPaths.shape[2], allPaths.shape[1], 2))
 
     # łatwiej będie analizować dla kojedyńczych ramek
-    for frame_idx in range(tdoa_list.shape[2]):
-        print(f"\r{frame_idx}", end='')
-        # a = tdoa_list[:, :, frame_idx]
-        # print(a.shape)
-        # print(a)
-        # TODO error_map len = src_number
-        error_map = [np.zeros_like(X), np.zeros_like(X)]
+    for frame_idx in range(allPaths.shape[2]):
+        print(f"\r{frame_idx + 1}", end = '')
+
+        errorMap = np.zeros((allPaths.shape[1], *X.shape))
+
         # teraz po każdej parze mikrofonow
-        for mic_idx in range(tdoa_list.shape[0]):
-            mic1_idx = mic_pairs[mic_idx][0] # numer 1 mikrofon
-            mic2_idx = mic_pairs[mic_idx][1] # numer 2 mikrofonu
-            mic1_pos = mic_positions[mic1_idx]
-            mic2_pos = mic_positions[mic2_idx]
-            # print(mic1_pos, mic2_pos)
+        for mic_idx in range(allPaths.shape[0]):
+            mic1_idx = micPairs[mic_idx][0] # numer 1 mikrofonu
+            mic2_idx = micPairs[mic_idx][1] # numer 2 mikrofonu
+            mic1_pos = micPositions[mic1_idx]
+            mic2_pos = micPositions[mic2_idx]
 
             d1x = X - mic1_pos[0]
             d1y = Y - mic1_pos[1]
@@ -236,27 +205,28 @@ def hyperbolaContours(tdoa_list, mic_pairs, mic_positions, X, Y, c = 343.0):
             H = d1 - d2
 
             # dla każdego potencjalnego źródła
-            for src_idx in range(tdoa_list.shape[1]):
-                tdoa = tdoa_list[mic_idx, src_idx, frame_idx]
+            for src_idx in range(allPaths.shape[1]):
+                tdoa = allPaths[mic_idx, src_idx, frame_idx]
                 delta_d = c * tdoa
                 H1 = H - delta_d
-                error_map[src_idx] += H1 * H1
+                errorMap[src_idx] += H1 * H1
 
-        error_map = np.array(error_map)
+        errorMap = np.array(errorMap)
 
-        for i in range(len(error_map)):
-            min_idx = np.unravel_index(np.argmin(error_map[i]), error_map[i].shape)
+        for i in range(errorMap.shape[0]):
+            min_idx = np.unravel_index(np.argmin(errorMap[i]), errorMap[i].shape)
             est_x = X[min_idx]
             est_y = Y[min_idx]
             est[frame_idx, i] = [est_x, est_y]
 
+    print("")
     return est
 
-def animateTrajectories(pos, interval=20, tail_length=50):
+def animateTrajectories(pos, interval = 20, tail_length = 50):
     n_frames = pos.shape[0]
     n_sources = pos.shape[1]
 
-    fig, ax = plt.subplots(figsize=(8, 8))
+    fig, ax = plt.subplots(figsize=(8, 6))
 
     margin = 0.02
     ax.set_xlim(np.min(pos[:, :, 0]) - margin, np.max(pos[:, :, 0]) + margin)
@@ -288,28 +258,31 @@ def animateTrajectories(pos, interval=20, tail_length=50):
             lines[i].set_data(x_history, y_history)
             points[i].set_data([pos[frame, i, 0]], [pos[frame, i, 1]])
 
-        time_text.set_text(f'Klatka: {frame}')
+        time_text.set_text(f'Klatka: {frame + 1}')
         return lines + points + [time_text]
 
-    ani = FuncAnimation(fig, update, frames=n_frames, interval=interval, blit=True, repeat=False)
+    ani = FuncAnimation(fig, update, frames=n_frames, interval=interval, blit=True, repeat=True)
 
+    plt.tight_layout()
     plt.show()
     return ani
 
 def main():
+    t_start = time.thread_time()
+
     # DATA
     timeSamplesGenerator, numberOfChannels, sampleRate = timeSamplesGeneratorFromWavFile(wavFiles[0], n = n)
+    delayRange = calculateDelayRange(sampleRate)
+    print(f"DelayRange: {delayRange}")
 
-    ccs = [
-        [],
-        [],
-        [],
-        []
-    ]
+    t_data = time.thread_time()
+    print(f"DATA:       {t_data - t_start} s")
 
     # GCC-PHAT
+    ccs = [[] for _ in range(numberOfChannels // 2)]
+
     for frame, block in enumerate(timeSamplesGenerator):
-        print(f"\r{frame}", end = "")
+        print(f"\r{frame + 1}", end = "")
 
         for i in range(numberOfChannels//2):
             channel1 = i
@@ -329,15 +302,24 @@ def main():
     print("")
     ccs = np.array(ccs)
 
-    # np.save('./data/ccs_96.npy', ccs)
-    # exit(0)
+    if saveData:
+        np.save('./data/ccs_96.npy', ccs)
 
-    # plotHeatmap2(ccs[0]) # TEST
+    # TEST
+    if testPlots:
+        for heatmap in ccs:
+            plt.figure(figsize=(8, 5))
+            plt.imshow(heatmap.T, cmap='gray', aspect='auto', origin='lower')
+            plt.tight_layout()
+            plt.show()
+
+    t_gcc = time.thread_time()
+    print(f"GCC-PHAT:   {t_gcc - t_data} s")
 
     # VITERBI
 
     numberOfLines = 2
-    beta = 2.0
+    sigma = 1.0
     emissionWeight = 5.0
     removeRadius = 3
 
@@ -350,27 +332,29 @@ def main():
         paths = calculatePathsVA(
             heatmap = heatmap,
             numberOfLines = numberOfLines,
-            beta = beta,
+            sigma = sigma,
             emissionWeight = emissionWeight,
             removeRadius = removeRadius
         )
 
-        print(paths.shape)
-
         allPaths.append(paths)
 
         # TEST
-        # plt.figure(figsize=(8, 5))
-        # plt.imshow(heatmap, cmap='gray', aspect='auto', origin='lower')
-        # for p in paths:
-        #     plt.plot(p, linewidth=2)
-        # plt.tight_layout()
-        # plt.show()
+        if testPlots:
+            plt.figure(figsize=(8, 5))
+            plt.imshow(heatmap, cmap='gray', aspect='auto', origin='lower')
+            for p in paths:
+                plt.plot(p, linewidth=2)
+            plt.tight_layout()
+            plt.show()
 
     allPaths = np.array(allPaths)
 
-    # np.save('data/allPaths_tda.npy', allPaths)
-    # exit(0)
+    if saveData:
+        np.save('data/allPaths_tda.npy', allPaths)
+
+    t_viterbi = time.thread_time()
+    print(f"VITERBI:    {t_viterbi - t_gcc} s")
 
     # HYPERBOLE
     microphonePositions = loadMicrophonePositions("./xml/ring8_capstone_wall.xml")
@@ -385,31 +369,32 @@ def main():
     y = np.linspace(-0.2, 0.2, 600)
     X, Y = np.meshgrid(x, y)
 
-
-    print(allPaths.shape)
-
     # zamiana na sekundy
     allPaths = (allPaths - delayRange) / sampleRate
 
-    pos = hyperbolaContours(allPaths, microphonePairs, microphonePositions, X, Y)
+    pos = hyperbolaContours(
+        allPaths = allPaths,
+        micPairs = microphonePairs,
+        micPositions = microphonePositions,
+        X = X,
+        Y = Y
+    )
 
-    print(pos)
-    # (1259, 2, 2)
-    print(pos.shape)
+    # np.save('data/trajectories.npy', allPaths)
 
-    # pos = pos[:,0]
-    #
-    # plt.figure(figsize=(8, 5))
-    # sc1 = plt.scatter(pos[:, 0, 0], pos[:, 0, 1], c=np.arange(pos.shape[0]), cmap='viridis')
-    # sc2 = plt.scatter(pos[:, 1, 0], pos[:, 1, 1], c=np.arange(pos.shape[0]), cmap='plasma')
-    # plt.colorbar(sc1)
-    # plt.show()
+    print(f"HYPERBOLE:  {time.thread_time() - t_viterbi} s")
 
+    # ANIMATION
     ani = animateTrajectories(pos)
-    # ani.save('./hiperbole/trajektoria.mp4', writer='ffmpeg', fps=30)
+
+    if saveData:
+        print('Saving animation...')
+        ani.save('./hiperbole/trajektoria.mp4', writer='ffmpeg', fps=30)
+
+    t_end = time.thread_time()
+
+    return t_end - t_start
 
 if __name__ == '__main__':
-    t1 = time.thread_time()
-    main()
-    t2 = time.thread_time()
-    print(f'Time: {t2 - t1} s')
+    time = main()
+    print(f'TIME:       {time} s')
