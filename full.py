@@ -406,11 +406,11 @@ def main():
     print(f"HYPERBOLE:  {time.thread_time() - t_viterbi} s")
 
     # ANIMATION
-    # ani = animateTrajectories(pos)
+    ani = animateTrajectories(pos)
 
-    # if saveData:
-    #     print('Saving animation...')
-    #     ani.save(output_dir / 'trajektoria.mp4', writer='ffmpeg', fps=30)
+    if saveData:
+        print('Saving animation...')
+        ani.save(output_dir / 'trajektoria.mp4', writer='ffmpeg', fps=30)
 
     t_end = time.thread_time()
 
