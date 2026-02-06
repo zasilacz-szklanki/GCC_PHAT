@@ -19,22 +19,30 @@ import scipy as sp
 import acoular as ac
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from pathlib import Path
+from datetime import datetime
 
 wavFiles = [
-    './audio/TwoDrones_96000Hz_24bit.wav',
-    './audio/20250612_1545_8ch_aligned.wav',
-    './audio/car_aligned.wav',
-    './audio/two_drones_aligned.wav'
+    'TwoDrones_96000Hz_24bit.wav',
+    '20250612_1545_8ch_aligned.wav',
+    'car_aligned.wav',
+    'two_drones_aligned.wav'
 ]
+
+wavFileIdx = 0
 
 n = 8192
 
 # True aby wyświetlać wykresy na bieżąco
-testPlots = True
+testPlots = False
 # True aby zapisywać dane
-saveData = False
-# prefiks dodawany plików przy zapisie
-filePrefix = ''
+saveData = True
+
+# konfiguracja zapisu
+# nazwa folderu: YYYY-MM-DD_HH-MM-SS
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+output_dir = Path("output") / f"{Path(wavFiles[wavFileIdx]).stem}_{timestamp}"
+output_dir.mkdir(parents = True, exist_ok = True)
 
 def loadMicrophonePositions(xml_file):
     mg = ac.MicGeom(file = xml_file)
@@ -47,7 +55,7 @@ def calculateDelayRange(sampleRate, c = 343.0):
     return int(delayRange // 2 + 1) + 10
 
 def timeSamplesGeneratorFromWavFile(filename, n = 8192):
-    sampleRate, wavData = sp.io.wavfile.read(filename)
+    sampleRate, wavData = sp.io.wavfile.read('./audio/' + filename)
 
     numberOfSamples = wavData.shape[0]
     numberOfChannels = wavData.shape[1] if wavData.ndim > 1 else 1
@@ -271,8 +279,9 @@ def main():
     t_start = time.thread_time()
 
     # DATA
-    timeSamplesGenerator, numberOfChannels, sampleRate = timeSamplesGeneratorFromWavFile(wavFiles[0], n = n)
-    delayRange = calculateDelayRange(sampleRate)
+    timeSamplesGenerator, numberOfChannels, sampleRate = timeSamplesGeneratorFromWavFile(wavFiles[wavFileIdx], n = n)
+
+    delayRange = 50 # calculateDelayRange(sampleRate)
     print(f"DelayRange: {delayRange}")
 
     t_data = time.thread_time()
@@ -303,25 +312,33 @@ def main():
     ccs = np.array(ccs)
 
     if saveData:
-        np.save('./data/ccs_96.npy', ccs)
+        np.save(output_dir / 'ccs.npy', ccs)
 
     # TEST
     if testPlots:
-        for heatmap in ccs:
+        for i in range(ccs.shape[0]):
+            heatmap = ccs[i].T
             plt.figure(figsize=(8, 5))
-            plt.imshow(heatmap.T, cmap='gray', aspect='auto', origin='lower')
+            plt.imshow(heatmap, cmap='gray', aspect='auto', origin='lower')
             plt.tight_layout()
+            if saveData:
+                plt.savefig(output_dir / f"heatmap_{i}.png", format="png")
             plt.show()
 
     t_gcc = time.thread_time()
     print(f"GCC-PHAT:   {t_gcc - t_data} s")
 
     # VITERBI
-
     numberOfLines = 2
     sigma = 1.0
     emissionWeight = 5.0
     removeRadius = 3
+    print(f"ViterbiParam:")
+    print(f"sources:    {numberOfLines}")
+    print(f"sigma:      {sigma}")
+    print(f"emisWeight: {emissionWeight}")
+    print(f"remRadius:  {removeRadius}")
+
 
     allPaths = []
 
@@ -346,12 +363,14 @@ def main():
             for p in paths:
                 plt.plot(p, linewidth=2)
             plt.tight_layout()
+            if saveData:
+                plt.savefig(output_dir / f"allPaths_{i}.png", format="png")
             plt.show()
 
     allPaths = np.array(allPaths)
 
     if saveData:
-        np.save('data/allPaths_tda.npy', allPaths)
+        np.save(output_dir / 'allPaths.npy', allPaths)
 
     t_viterbi = time.thread_time()
     print(f"VITERBI:    {t_viterbi - t_gcc} s")
@@ -380,7 +399,8 @@ def main():
         Y = Y
     )
 
-    # np.save('data/trajectories.npy', allPaths)
+    if saveData:
+        np.save(output_dir / 'trajectories.npy', pos)
 
     print(f"HYPERBOLE:  {time.thread_time() - t_viterbi} s")
 
@@ -389,7 +409,7 @@ def main():
 
     if saveData:
         print('Saving animation...')
-        ani.save('./hiperbole/trajektoria.mp4', writer='ffmpeg', fps=30)
+        ani.save(output_dir / 'trajektoria.mp4', writer='ffmpeg', fps=30)
 
     t_end = time.thread_time()
 
@@ -397,4 +417,5 @@ def main():
 
 if __name__ == '__main__':
     time = main()
-    print(f'TIME:       {time} s')
+    print(f'TIME:       {time} s\n')
+    print("=" * 50, end="\n\n")
