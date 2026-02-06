@@ -34,7 +34,7 @@ wavFileIdx = 0
 n = 8192
 
 # True aby wyświetlać wykresy na bieżąco
-testPlots = False
+testPlots = True
 # True aby zapisywać dane
 saveData = True
 
@@ -52,7 +52,7 @@ def calculateDelayRange(sampleRate, c = 343.0):
     # maksymalne możliwe opoźnienie w próbkac
     microphoneDistance = 0.23 # [m]
     delayRange = microphoneDistance * sampleRate / c
-    return int(delayRange // 2 + 1) + 10
+    return int(np.ceil(delayRange))
 
 def timeSamplesGeneratorFromWavFile(filename, n = 8192):
     sampleRate, wavData = sp.io.wavfile.read('./audio/' + filename)
@@ -281,7 +281,8 @@ def main():
     # DATA
     timeSamplesGenerator, numberOfChannels, sampleRate = timeSamplesGeneratorFromWavFile(wavFiles[wavFileIdx], n = n)
 
-    delayRange = 50 # calculateDelayRange(sampleRate)
+    delayRange = calculateDelayRange(sampleRate)
+    # delayRange = 50
     print(f"DelayRange: {delayRange}")
 
     t_data = time.thread_time()
@@ -405,11 +406,11 @@ def main():
     print(f"HYPERBOLE:  {time.thread_time() - t_viterbi} s")
 
     # ANIMATION
-    ani = animateTrajectories(pos)
+    # ani = animateTrajectories(pos)
 
-    if saveData:
-        print('Saving animation...')
-        ani.save(output_dir / 'trajektoria.mp4', writer='ffmpeg', fps=30)
+    # if saveData:
+    #     print('Saving animation...')
+    #     ani.save(output_dir / 'trajektoria.mp4', writer='ffmpeg', fps=30)
 
     t_end = time.thread_time()
 
